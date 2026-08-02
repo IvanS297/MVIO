@@ -8,20 +8,33 @@ using namespace std;
 int main() {
     serialib serial;
     char error = serial.openDevice("/dev/ttyUSB0", 115200);
-    if (error != 1) return error;
+    if (error != 1) {
+        cout << "Error opening device: " << (int)error << endl;
+        return error;
+    }
     cout << "opened" << endl;
 
     std::stringstream ss;
     char buffer[73] = "";
-    for (int i = 0; i < 100; ++i) {
-        serial.readString(buffer, '\n', 72, 2000);
-        cout << buffer << endl;
-        ss << buffer;
+    
+    for (int i = 0; i < 102; ++i) {
+        int bytes_read = serial.readString(buffer, '\n', 72, 2000);
+             
+        if (bytes_read > 0) {
+            cout << buffer << endl;
+            if (i < 2) continue;    
+            ss << buffer << "\n"; 
+        }
+        
         buffer[0] = '\0';
     }
+    
     serial.closeDevice();
     cout << "closed" << endl;
+
     rapidcsv::Document doc(ss, rapidcsv::LabelParams(-1, -1));
     doc.Save("data.csv");
+    
+    cout << "Dataset saved to data.csv" << endl;
     return 0;
 }
