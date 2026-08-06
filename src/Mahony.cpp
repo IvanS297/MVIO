@@ -1,5 +1,6 @@
 #include "include/Mahony.hpp"
 #include "include/rapidcsv.h"
+#include "include/Kinematics.hpp"
 
 void Mahony::init_quat(double w, double x, double y, double z) {
     this->est_quat = {w, x, y, z};
@@ -74,45 +75,31 @@ Eigen::Quaterniond Mahony::gyro_acc_mag_fusion(Eigen::Vector3d& acc, Eigen::Vect
     Eigen::Vector3d corrected_gyr = gyr;
     Eigen::Vector3d v_g, v_m, b, h;
     
-    // Получаем текущую матрицу поворота из тела датчика в глобальную систему (Body to Global)
     Eigen::Matrix3d dcm = this->est_quat.toRotationMatrix();
-
     if (acc_norm > 0.0 && mag_norm > 0.0) {
-        // 1. Обработка акселерометра
         Eigen::Vector3d a = acc / acc_norm;
         Eigen::Vector3d g = (this->nav_frame == "ENU") ? Eigen::Vector3d(0.0, 0.0, 1.0) : Eigen::Vector3d(0.0, 0.0, -1.0);
         
-        // v_g — это вектор гравитации, переведенный ИЗ глобальной системы В систему датчика
         v_g = dcm.transpose() * g;
         Eigen::Vector3d acc_error = a.cross(v_g);
-
-        // 2. Обработка магнитометра
         Eigen::Vector3d m = mag / mag_norm;
-        
-        // ИСПРАВЛЕНО: Переводим измеренное поле ИЗ системы датчика В глобальную систему
         h = dcm * m; 
 
-        // ИСПРАВЛЕНО: Вычисляем b (избавляемся от влияния наклона на курс)
         if (this->nav_frame == "ENU") {
-            // В ENU: X - Восток (0), Y - Север (магнитный вектор), Z - Вверх
             b = {0.0, std::sqrt(h.x() * h.x() + h.y() * h.y()), h.z()};
         }
         else if (this->nav_frame == "NED") {
-            // В NED: X - Север (магнитный вектор), Y - Восток (0), Z - Вниз
             b = {std::sqrt(h.x() * h.x() + h.y() * h.y()), 0.0, h.z()};
         }
 
-        // v_m — это эталонное поле, переведенное ИЗ глобальной системы В систему датчика
         v_m = dcm.transpose() * b;
         Eigen::Vector3d mag_error = m.cross(v_m);
 
-        // 3. Общая ошибка и коррекция гироскопа
         Eigen::Vector3d total_error = acc_error + mag_error;
         this->gyro_bias += this->ki * total_error * dt;
         corrected_gyr = gyr + this->gyro_bias + this->kp * total_error; 
     }
 
-    // Численное интегрирование кватерниона
     Eigen::Quaterniond omega(0.0, corrected_gyr.x(), corrected_gyr.y(), corrected_gyr.z());
     Eigen::Quaterniond quat_derivative;
     quat_derivative.coeffs() = 0.5 * (this->est_quat * omega).coeffs();
@@ -124,59 +111,10 @@ Eigen::Quaterniond Mahony::gyro_acc_mag_fusion(Eigen::Vector3d& acc, Eigen::Vect
 }
 
 
-// Eigen::Quaterniond Mahony::gyro_acc_mag_fusion(Eigen::Vector3d& acc, Eigen::Vector3d& gyr, Eigen::Vector3d& mag, double dt) {
-//     double acc_norm = acc.norm();
-//     double mag_norm = mag.norm();
-//     Eigen::Vector3d corrected_gyr = gyr;
-//     Eigen::Vector3d v_g, v_m, b, h;
-//     Eigen::Matrix3d dcm = this->est_quat.toRotationMatrix();
-
-//     if (acc_norm > 0.0 && mag_norm > 0.0) {
-//         Eigen::Vector3d a = acc / acc_norm;
-
-//         if (this->nav_frame == "ENU") {
-//             Eigen::Vector3d g = {0.0, 0.0, 1.0};
-//             v_g = dcm.transpose() * g;
-//         }
-
-//         else if (this->nav_frame == "NED") {
-//             Eigen::Vector3d g = {0.0, 0.0, -1.0};
-//             v_g = dcm.transpose() * g;
-//         }
-
-//         Eigen::Vector3d acc_error = a.cross(v_g);
-//         Eigen::Vector3d m = mag / mag_norm;
-//         h = dcm * m;
-
-//         if (this->nav_frame == "ENU") {
-//             b = {0.0, sqrt(pow(h[0], 2) + pow(h[1], 2)), h[2]};
-//         }
-
-//         else if (this->nav_frame == "NED") {
-//             b = {sqrt(pow(h[0], 2) + pow(h[1], 2)), 0.0, h[2]};
-//         }
-
-//         v_m = dcm.transpose() * b;
-//         Eigen::Vector3d mag_error = m.cross(v_m);
-//         Eigen::Vector3d total_error = acc_error + mag_error;
-//         this->gyro_bias += this->ki * total_error * dt;
-//         corrected_gyr = gyr + this->gyro_bias + this->kp * total_error; 
-//     }
-
-//     Eigen::Quaterniond omega(0.0, corrected_gyr.x(), corrected_gyr.y(), corrected_gyr.z());
-//     Eigen::Quaterniond quat_derivative;
-//     quat_derivative.coeffs() = 0.5 * (this->est_quat * omega).coeffs();
-    
-//     this->est_quat.coeffs() += quat_derivative.coeffs() * dt;
-//     this->est_quat.normalize();
-    
-//     return this->est_quat;
-// }
-    
-
 int main() {
     Mahony mahony(9, 0.001, 0.5, "ENU");
     mahony.init_quat(1.0, 0.0, 0.0, 0.0);
+    IMU_kinematic kin(0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
     rapidcsv::Document doc("../data.csv", rapidcsv::LabelParams(-1, -1));
     size_t rows = doc.GetRowCount();
     double prev_time = 0.0;
@@ -197,15 +135,19 @@ int main() {
             Eigen::Vector3d gyr = { std::stod(row_str[4]), std::stod(row_str[5]), std::stod(row_str[6]) };
             Eigen::Vector3d mag = { std::stod(row_str[7]), std::stod(row_str[8]), std::stod(row_str[9]) };
 
-            gyr = gyr * (M_PI / 180.0); 
+            //gyr = gyr * (M_PI / 180.0); 
             Eigen::Quaterniond filtered = mahony.gyro_acc_mag_fusion(acc, gyr, mag, dt);
             //Eigen::Quaterniond filtered = mahony.gyro_acc_fusion(acc, gyr, dt);
+
             EulerAngles deg = quaternionToDegrees(filtered);
 
             std::cout << "Roll: " << deg.roll << " "
                       << "Pitch: " << deg.pitch << " "
                       << "Yaw: " << deg.yaw << std::endl;
 
+            Eigen::Vector3d a = kin.get_a_lin(acc, filtered);
+            Eigen::Vector3d xyz = kin.xyz(acc, filtered, dt);
+            std::cout << "X " << xyz[0] << " Y " << xyz[1] << " Z " << xyz[2] << std::endl; 
         } catch (const std::exception& e) {
             std::cerr << "Error parsing " << i << ": " << e.what() << std::endl;
             continue;
