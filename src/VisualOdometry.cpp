@@ -9,15 +9,19 @@
 using namespace cv;
 using namespace std;
 
-VO::VO(camera_info info) {
+VO::VO(camera_info info, int min_features, float parallax_thresh, float ratio_test, int orb_features) {
     cam_info = info;
 
     cur_pose = cv::Mat::eye(4, 4, CV_64F);
-    orb = cv::ORB::create(2000);
+    orb = cv::ORB::create(orb_features);
 
     cv::Ptr<cv::flann::IndexParams> indexParams = cv::makePtr<cv::flann::LshIndexParams>(12, 20, 2);
     cv::Ptr<cv::flann::SearchParams> searchParams = cv::makePtr<cv::flann::SearchParams>();
     flann = cv::makePtr<cv::FlannBasedMatcher>(indexParams, searchParams);
+
+    MIN_FEATURES = min_features;
+    PARALLAX_THRESHOLD = parallax_thresh;
+    RATIO_TEST = ratio_test;
 }
 
 cv::Mat VO::form_transf(const cv::Mat& R, const cv::Mat& t) {
@@ -142,11 +146,21 @@ void VO::decomp_essential_mat(const cv::Mat& E, const std::vector<cv::Point2f>& 
 cv::Mat VO::get_pose(const std::vector<cv::Point2f>& q1, const std::vector<cv::Point2f>& q2) {
     if (q1.size() < 8 || q2.size() < 8) return cv::Mat();
 
-    cv::Mat E = cv::findEssentialMat(q1, q2, cam_info.k, cv::RANSAC, 0.999, 1.0);
+    cv::Mat mask;
+    cv::Mat E = cv::findEssentialMat(q1, q2, cam_info.k, cv::RANSAC, 0.999, 1.0, mask);
+    if (mask.rows != static_cast<int>(q1.size())) {
+        return cv::Mat();  // защита от рассинхрона размеров
+    }
     if (E.empty() || E.rows != 3 || E.cols != 3) return cv::Mat();
 
+    std::vector<cv::Point2f> q1_in, q2_in;
+    filter_by_mask(q1, q2, mask, q1_in, q2_in);
+    std::cout << "[INFO] RANSAC inliers: " << q1_in.size() << " / " << q1.size() << std::endl;
+
+    if (q1_in.size() < 8) return cv::Mat();  // после фильтрации может остаться слишком мало точек
+
     cv::Mat R, t;
-    decomp_essential_mat(E, q1, q2, R, t);
+    decomp_essential_mat(E, q1_in, q2_in, R, t);
 
     return form_transf(R, t);
 }
@@ -174,6 +188,17 @@ void VO::image_callback(Mat &image)
         {
             std::vector<cv::Point2f> q1, q2;
             get_matches(image, q1, q2);
+            
+            // в этой версии используется подход frame-to-frame, а key-frame
+            /*
+            В чем смыл key-frame, если можно использовать frame-to-frame для вычисления смещения и поворота?
+            Смысл в том, что есть какое-то "эталонное" изображение, с которым сравнивается текущее, и на основе этого вычисляется смещени и поворот.
+            Как только общих точек становится мало, то эталонное изображение меняется на текущее, и процесс идет по кругу.
+            */
+            if (shouldCreateNewKeyframe(q1, q2)) {
+                prev_img = image;
+            }
+
             if (q1.size() >= 8 && q2.size() >= 8)
             {
                 std::cout << "[INFO] Found " << q1.size() << " matches" << std::endl;
@@ -227,7 +252,7 @@ void VO::get_matches(const cv::Mat& current_image, std::vector<cv::Point2f>& q1,
     std::vector<cv::DMatch> good;
     for (const auto& match_pair : matches) {
         if (match_pair.size() >= 2) {
-            if (match_pair[0].distance < 0.95f * match_pair[1].distance) {
+            if (match_pair[0].distance < RATIO_TEST * match_pair[1].distance) {
                 good.push_back(match_pair[0]);
             }
         }
@@ -247,6 +272,30 @@ void VO::get_matches(const cv::Mat& current_image, std::vector<cv::Point2f>& q1,
     }
 }
 
+bool VO::shouldCreateNewKeyframe(const std::vector<cv::Point2f>& q1, const std::vector<cv::Point2f>& q2) {
+    if (q1.size() < MIN_FEATURES) return true;  // трекинг рассыпается — нужен новый keyframe
+    
+    double sum_disp = 0.0;
+    for (size_t i = 0; i < q1.size(); ++i) {
+        sum_disp += cv::norm(q1[i] - q2[i]);
+    }
+    double mean_disp = sum_disp / q1.size();
+    
+    return mean_disp > PARALLAX_THRESHOLD;
+}
+
+void VO::filter_by_mask(const std::vector<cv::Point2f>& q1, const std::vector<cv::Point2f>& q2, const cv::Mat& mask,
+                        std::vector<cv::Point2f>& q1_inliers, std::vector<cv::Point2f>& q2_inliers) {
+    q1_inliers.clear();
+    q2_inliers.clear();
+    for (int i = 0; i < mask.rows; ++i) {
+        if (mask.at<uchar>(i, 0) != 0) {
+            q1_inliers.push_back(q1[i]);
+            q2_inliers.push_back(q2[i]);
+        }
+    }
+}
+
 cv::Mat k = (cv::Mat_<double>(3,3) << 810.88756426, 0.0, 291.91410185,
          0.0, 810.24169473, 171.78701343,
          0.0, 0.0, 1.0);
@@ -259,11 +308,11 @@ cv::Mat r{1.0, 0.0, 0.0,
          0.0, 1.0, 0.0,
          0.0, 0.0, 1.0};
 camera_info cam_info = {640, 360, k, d, r, p};
-VO vo(cam_info);
+VO vo(cam_info, 50, 20.0, 0.8, 2000);
 
 int main()
 {
-    VideoCapture cap("http://192.168.137.39:5000");
+    VideoCapture cap(0);
     auto now = chrono::system_clock::now();
     auto prev = now;
 

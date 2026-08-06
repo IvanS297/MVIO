@@ -14,12 +14,20 @@ struct camera_info {
 
 class VO {
     public:
-        VO(camera_info info);
+        VO(camera_info info, int min_features, float parallax_thresh, float ratio_test, int orb_features);
         
         void image_callback(cv::Mat& image);
+        
         void get_matches(const cv::Mat& current_image, std::vector<cv::Point2f>& q1, std::vector<cv::Point2f>& q2);
+        
         cv::Mat get_pose(const std::vector<cv::Point2f>& q1, const std::vector<cv::Point2f>& q2);
+        
         cv::Mat form_transf(const cv::Mat& R, const cv::Mat& t);
+        
+        bool shouldCreateNewKeyframe(const std::vector<cv::Point2f>& q1, const std::vector<cv::Point2f>& q2);
+        
+        void filter_by_mask(const std::vector<cv::Point2f>& q1, const std::vector<cv::Point2f>& q2, const cv::Mat& mask,
+                    std::vector<cv::Point2f>& q1_inliers, std::vector<cv::Point2f>& q2_inliers);
         
     private:
         cv::Ptr<cv::ORB> orb;
@@ -30,6 +38,10 @@ class VO {
         cv::Mat prev_img;
         camera_info cam_info;
         cv::Mat cur_pose;
+
+        int MIN_FEATURES;
+        float PARALLAX_THRESHOLD;
+        float RATIO_TEST;
 
         void decomp_essential_mat(const cv::Mat& E, const std::vector<cv::Point2f>& q1, const std::vector<cv::Point2f>& q2, cv::Mat& out_R, cv::Mat& out_t);
         void sum_z_cal_relative_scale(const cv::Mat& R, const cv::Mat& t, 

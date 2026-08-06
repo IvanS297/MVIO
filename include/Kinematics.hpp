@@ -15,6 +15,9 @@ class IMU_kinematic {
 
         Eigen::Vector3d get_a_lin(const Eigen::Vector3d& a_l, const Eigen::Quaterniond& q_l);
         Eigen::Vector3d xyz(const Eigen::Vector3d& a_lin, const Eigen::Quaterniond& q_l, double dt);
+
+        Eigen::Matrix3d get_r_mat();
+        Eigen::Vector3d get_t_vec();
         void reset();
     private:
         Eigen::Vector3d p_imu = {0.0, 0.0, 0.0};
@@ -42,4 +45,11 @@ Eigen::Vector3d IMU_kinematic::xyz(const Eigen::Vector3d& a_lin, const Eigen::Qu
 void IMU_kinematic::reset() {
     p_imu.setZero();
     v_imu.setZero();
+}
+
+Eigen::Matrix3d IMU_kinematic::get_r_mat() {
+    return R;
+}
+Eigen::Vector3d IMU_kinematic::get_t_vec() {
+    return T;
 }

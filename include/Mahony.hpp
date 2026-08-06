@@ -13,7 +13,7 @@ struct EulerAngles {
 
 class Mahony {
     public:
-    Mahony(int axis, int ki, int kp, std::string nav_frame) : 
+    Mahony(int axis, double ki, double kp, std::string nav_frame) : 
         axis(axis), ki(ki), kp(kp), nav_frame(nav_frame) {
             if (nav_frame != "ENU" && nav_frame != "NED") {throw std::invalid_argument("nav frame must be only ENU or NED"); }
             if (axis != 6 && axis != 9) {throw std::invalid_argument("axis count must be only 6 or 9");}
