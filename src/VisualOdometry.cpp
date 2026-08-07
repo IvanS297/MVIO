@@ -155,7 +155,7 @@ cv::Mat VO::get_pose(const std::vector<cv::Point2f>& q1, const std::vector<cv::P
 
     std::vector<cv::Point2f> q1_in, q2_in;
     filter_by_mask(q1, q2, mask, q1_in, q2_in);
-    std::cout << "[INFO] RANSAC inliers: " << q1_in.size() << " / " << q1.size() << std::endl;
+    // std::cout << "[INFO] RANSAC inliers: " << q1_in.size() << " / " << q1.size() << std::endl;
 
     if (q1_in.size() < 8) return cv::Mat();  // после фильтрации может остаться слишком мало точек
 
@@ -182,6 +182,8 @@ void VO::image_callback(Mat &image)
     
     cv::cvtColor(dst, gray, cv::COLOR_BGR2GRAY);
     image = gray;
+
+    static bool first_cycle = true;
     if (!prev_img.empty())
     {
         try
@@ -196,45 +198,50 @@ void VO::image_callback(Mat &image)
             Как только общих точек становится мало, то эталонное изображение меняется на текущее, и процесс идет по кругу.
             */
             if (shouldCreateNewKeyframe(q1, q2)) {
-                prev_img = image;
-            }
-
-            if (q1.size() >= 8 && q2.size() >= 8)
-            {
-                std::cout << "[INFO] Found " << q1.size() << " matches" << std::endl;
-                cv::Mat transf;
-                try {
-                    transf = get_pose(q1, q2);
-                } catch (const cv::Exception& e) {
-                    std::cerr << "get pose error: " << e.what() << std::endl;
-                    return;
-                }
-                if (!transf.empty())
+                if (q1.size() >= 8 && q2.size() >= 8)
                 {
-                    cv::Mat transf_inv = transf.inv();
+                    //std::cout << "[INFO] Found " << q1.size() << " matches" << std::endl;
+                    cv::Mat transf;
                     try {
-                        cur_pose = cur_pose * transf_inv;
-                        double x = cur_pose.at<double>(0, 3);
-                        double y = cur_pose.at<double>(1, 3);
-                        double z = cur_pose.at<double>(2, 3);
-                        std::cout << "Robot Position -> X: " << x << " | Y: " << y << " | Z: " << z << std::endl;                    
+                        transf = get_pose(q1, q2);
                     } catch (const cv::Exception& e) {
-                        std::cerr << "cur_pose error: " << e.what() << std::endl;
+                        std::cerr << "get pose error: " << e.what() << std::endl;
                         return;
                     }
+                    if (!transf.empty())
+                    {
+                        cv::Mat transf_inv = transf.inv();
+                        try {
+                            cur_pose = cur_pose * transf_inv;                    
+                        } catch (const cv::Exception& e) {
+                            std::cerr << "cur_pose error: " << e.what() << std::endl;
+                            return;
+                        }
+                    }
+                    
                 }
-                
+                prev_img = image;
             }
-        }
+            double x = cur_pose.at<double>(0, 3);
+            double y = cur_pose.at<double>(1, 3);
+            double z = cur_pose.at<double>(2, 3);
+            std::cout << "Robot Position -> X: " << x << " | Y: " << y << " | Z: " << z << std::endl;
+            }
         catch (const std::exception &e)
         {
             std::cerr << "Общая ошибка: " << e.what() << '\n';
         }
     }
-    prev_img = image;
+    if (first_cycle) {
+        prev_img = image;
+        first_cycle = false;
+    }
 }
 
 void VO::get_matches(const cv::Mat& current_image, std::vector<cv::Point2f>& q1, std::vector<cv::Point2f>& q2) {
+    /*
+    Функция нужна чтобы взять из изобраения ключевые точки, тут я использую связку ORB детектор и FLANN мэтчер с LSH хэшированием вместо K, KD деревьев.
+    */
     q1.clear();
     q2.clear();
 
@@ -280,7 +287,7 @@ bool VO::shouldCreateNewKeyframe(const std::vector<cv::Point2f>& q1, const std::
         sum_disp += cv::norm(q1[i] - q2[i]);
     }
     double mean_disp = sum_disp / q1.size();
-    
+    // cout << "MEAN DISP PARALLAX " << mean_disp << endl;
     return mean_disp > PARALLAX_THRESHOLD;
 }
 
@@ -308,11 +315,11 @@ cv::Mat r{1.0, 0.0, 0.0,
          0.0, 1.0, 0.0,
          0.0, 0.0, 1.0};
 camera_info cam_info = {640, 360, k, d, r, p};
-VO vo(cam_info, 50, 20.0, 0.8, 2000);
+VO vo(cam_info, 50, 20.0, 0.8, 1000);
 
 int main()
 {
-    VideoCapture cap(0);
+    VideoCapture cap(2);
     auto now = chrono::system_clock::now();
     auto prev = now;
 
@@ -322,7 +329,7 @@ int main()
         return -1;
     }
 
-    Mat frame;
+    Mat frame, debug;
     while (true)
     {
         if (now == prev)
@@ -332,6 +339,7 @@ int main()
         }
         now = chrono::system_clock::now();
         cap >> frame;
+        debug = frame.clone();
         
         if (frame.empty())
         {
@@ -339,11 +347,11 @@ int main()
             break;
         }
 
-        imshow("Camera", frame);
         vo.image_callback(frame);
 
-        // float fps = 1000.0f / chrono::duration_cast<chrono::milliseconds>(now - prev).count();
-        // cv::putText(frame, "FPS: " + to_string(fps), cv::Point(50, 350), cv::FONT_HERSHEY_SIMPLEX, 1.0, cv::Scalar(0, 255, 255), 2, cv::LINE_AA);
+        float fps = 1000.0f / chrono::duration_cast<chrono::milliseconds>(now - prev).count();
+        cv::putText(debug, "FPS: " + to_string(fps), cv::Point(50, 350), cv::FONT_HERSHEY_SIMPLEX, 1.0, cv::Scalar(0, 255, 255), 2, cv::LINE_AA);
+        imshow("Camera", debug);
 
         if (waitKey(1) == 27)
             break;
