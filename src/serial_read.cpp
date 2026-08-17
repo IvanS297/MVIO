@@ -17,13 +17,17 @@ int main() {
     std::stringstream ss;
     char buffer[73] = "";
     
-    for (int i = 0; i < 102; ++i) {
+    for (int i = 2; i < 2520002; ++i) {
         int bytes_read = serial.readString(buffer, '\n', 72, 2000);
-             
+            
         if (bytes_read > 0) {
-            cout << buffer << endl;
+            std::string line(buffer);
+            if (!line.empty() && line.back() == '\r') {
+                line.pop_back();  // убираем хвостовой \r, если он есть
+            }
+            cout << line << endl;
             if (i < 2) continue;    
-            ss << buffer << "\n"; 
+            ss << line << "\n"; 
         }
         
         buffer[0] = '\0';

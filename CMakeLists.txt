@@ -33,3 +33,7 @@ add_executable(serial_test src/serial_read.cpp)
 target_include_directories(rapidcsv INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_include_directories(serialib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(serial_test PRIVATE serialib rapidcsv)
+
+add_executable(dispersion src/disp.cpp)
+target_include_directories(rapidcsv INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(dispersion PRIVATE rapidcsv)
