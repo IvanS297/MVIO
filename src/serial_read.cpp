@@ -15,19 +15,21 @@ int main() {
     cout << "opened" << endl;
 
     std::stringstream ss;
-    char buffer[73] = "";
+    char buffer[83] = "";
     
-    for (int i = 2; i < 2520002; ++i) {
-        int bytes_read = serial.readString(buffer, '\n', 72, 2000);
+    for (int i = 0; i < 250; ++i) {
+        int bytes_read = serial.readString(buffer, '\n', 83, 2000);
             
-        if (bytes_read > 0) {
-            std::string line(buffer);
-            if (!line.empty() && line.back() == '\r') {
-                line.pop_back();  // убираем хвостовой \r, если он есть
+        if (i > 0) {
+            if (bytes_read > 0) {
+                std::string line(buffer);
+                if (!line.empty() && line.back() == '\r') {
+                    line.pop_back();  // убираем хвостовой \r, если он есть
+                }
+                cout << line << endl;
+                if (i < 2) continue;    
+                ss << line << "\n"; 
             }
-            cout << line << endl;
-            if (i < 2) continue;    
-            ss << line << "\n"; 
         }
         
         buffer[0] = '\0';

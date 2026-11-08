@@ -1,15 +1,26 @@
-#include <string>
+#include <bits/stdc++.h>
 #include <Eigen/Dense>
 #include <Eigen/Eigen>
-#include <stdexcept>
-#include <vector>
-#include <iostream>
 
 struct EulerAngles {
     double roll;
     double pitch;
     double yaw;
 };
+
+/*
+ENU:
+Гравитация направлена вниз
+Акселерометр выдает данные в м/c^2
+Гироскоп в right-hand СК (X-Y-Z) выдает рад/c
+Магнетометр выдает магнитное поле в микро Теслах
+
+NED:
+Гравитация направлена вверх
+Акселерометр выдает данные в м/c^2
+Гироскоп в right-hand СК (X-Y-Z) выдает в рад/c
+Магнетометр выдает магнитное поле в микро Теслах
+*/
 
 class Mahony {
     public:
@@ -25,13 +36,12 @@ class Mahony {
     
     private:
     int axis;
-    int ki;
-    int kp;
+    double ki;
+    double kp;
     std::string nav_frame = "ENU";
 
     Eigen::Quaterniond est_quat{1.0, 0.0, 0.0, 0.0};
     Eigen::MatrixXd gyro_bias = Eigen::MatrixXd::Zero(3, 1);
-
 };
 
 /*

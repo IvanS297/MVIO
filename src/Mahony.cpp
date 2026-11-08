@@ -112,44 +112,53 @@ Eigen::Quaterniond Mahony::gyro_acc_mag_fusion(Eigen::Vector3d& acc, Eigen::Vect
 
 
 int main() {
-    Mahony mahony(9, 1.0, 0.5, "ENU");
+    // axis ki kp nav_frame
+    Mahony mahony(9, 0.01, 1.5, "ENU");
     mahony.init_quat(1.0, 0.0, 0.0, 0.0);
     IMU_kinematic kin(0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
-    rapidcsv::Document doc("../data.csv", rapidcsv::LabelParams(-1, -1));
+    rapidcsv::Document doc("data.csv", rapidcsv::LabelParams(-1, -1));
     size_t rows = doc.GetRowCount();
-    double prev_time = 0.0;
+    // double prev_time = 0.0;
+    Eigen::Matrix3d R_mag;
+    R_mag << 0,  1, 0,
+            -1,  0, 0,
+            0,  0, 1;
+
+    double gz_sum = 0.0;
+
+    double prev_time = 0.0, current_time = 0.0;
+    prev_time = 0;
 
     for (size_t i = 0; i < rows; ++i) {
         std::vector<std::string> row_str = doc.GetRow<std::string>(i);
         if (row_str.size() < 7 || row_str[0].empty()) continue;
 
         try {
-            double current_time = std::stod(row_str[0]);
+            current_time = std::stod(row_str[0]) / 1000.0;
             double dt = 0.01;
-            if (i > 0) {
-                dt = (current_time - prev_time) / 1000000.0; 
-            }
+            if (i > 0) dt = current_time - prev_time;      
             prev_time = current_time;
 
             Eigen::Vector3d acc = { std::stod(row_str[1]), std::stod(row_str[2]), std::stod(row_str[3]) };
             Eigen::Vector3d gyr = { std::stod(row_str[4]), std::stod(row_str[5]), std::stod(row_str[6]) };
             Eigen::Vector3d mag = { std::stod(row_str[7]), std::stod(row_str[8]), std::stod(row_str[9]) };
 
-            //gyr = gyr * (M_PI / 180.0); 
-            Eigen::Quaterniond filtered = mahony.gyro_acc_mag_fusion(acc, gyr, mag, dt); // этот кватренион пока что только в СК IMU
+            mag = R_mag * mag;  // сначала калибровка, потом поворот
+            Eigen::Quaterniond filtered = mahony.gyro_acc_mag_fusion(acc, gyr, mag, dt); // этот кватренион пока что только в СК IMU        
+            // Eigen::Quaterniond filtered = mahony.gyro_acc_fusion(acc, gyr, dt);
+    
             Eigen::Quaterniond r_quat(kin.get_r_mat());
             Eigen::Quaterniond fil_base = filtered * r_quat;
-            //Eigen::Quaterniond filtered = mahony.gyro_acc_fusion(acc, gyr, dt);
-
             EulerAngles deg = quaternionToDegrees(fil_base);
 
-            std::cout << "Roll: " << deg.roll << " "
-                      << "Pitch: " << deg.pitch << " "
-                      << "Yaw: " << deg.yaw << std::endl;
+            std::cout << "Roll: " << deg.roll << " " << "Pitch: " << deg.pitch << " " << "Yaw: " << deg.yaw << std::endl;
 
             Eigen::Vector3d a = kin.get_a_lin(acc, fil_base);
             Eigen::Vector3d xyz = kin.xyz(acc, fil_base, dt);
-            std::cout << "X " << xyz[0] << " Y " << xyz[1] << " Z " << xyz[2] << std::endl; 
+            // std::cout << "X " << xyz[0] << " Y " << xyz[1] << " Z " << xyz[2] << std::endl; 
+
+            gz_sum += gyr.z() * dt;
+            // std::cout << "dt=" << dt << "  gz=" << gyr.z() << "  integral(deg)=" << gz_sum * 180.0 / M_PI << std::endl;
         } catch (const std::exception& e) {
             std::cerr << "Error parsing " << i << ": " << e.what() << std::endl;
             continue;
